@@ -169,8 +169,80 @@ OPENROUTER_API_KEY=sk-or-...        # or OpenRouter
 PYTHONPATH=. uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+The app automatically finds your kubeconfig from `~/.kube/config` — no need to pass it manually.
+
 Open [http://localhost:8000](http://localhost:8000) for the dashboard.
 Open [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive API reference.
+
+---
+
+## Testing with local Minikube
+
+If you want to test the debugger locally without a real cluster, use the included test scenarios that create intentionally broken pods.
+
+### Prerequisites
+```bash
+# Start minikube
+minikube start
+
+# Verify cluster is running
+kubectl get nodes
+# NAME       STATUS   ROLES           AGE   VERSION
+# minikube   Ready    control-plane   11m   v1.31.0
+```
+
+### Deploy all broken test scenarios
+```bash
+# Clone and go into test scenarios folder
+cd k8s-test-scenarios
+chmod +x scripts/*.sh
+
+# Deploy all 8 broken scenarios
+./scripts/deploy-all.sh
+
+# Check their status
+./scripts/status.sh
+```
+
+Expected pod states after ~30 seconds:
+```
+test-configerror    → CreateContainerConfigError  (missing ConfigMap)
+test-crashloop      → CrashLoopBackOff            (container exits with code 1)
+test-failedjob      → Error                       (job hit backoff limit)
+test-imagepull      → ImagePullBackOff             (image tag doesn't exist)
+test-oom            → CrashLoopBackOff            (OOMKilled — memory too low)
+test-pending        → Pending                     (requests 100Gi RAM)
+test-storage        → Pending                     (PVC unbound — missing StorageClass)
+test-app            → Running                     (but service has wrong selector)
+```
+
+### Investigate each scenario
+
+Start the debugger:
+```bash
+cd k8s-ai-debugger
+PYTHONPATH=. uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Open `http://localhost:8000` and investigate:
+
+| What to enter | Expected detection |
+|---|---|
+| namespace: `default`, scan: `full` | Detects all failures at once |
+| pod: `test-crashloop-xxx` | CrashLoopBackOff |
+| pod: `test-imagepull-xxx` | ImagePullBackOff |
+| pod: `test-oom-xxx` | OOMKilled |
+| pod: `test-pending-xxx` | Scheduling failure |
+| pod: `test-configerror-xxx` | Missing ConfigMap |
+| pod: `test-storage-xxx` | PVC unbound |
+| deployment: `test-app` | Service selector mismatch |
+| job: `test-failedjob` | Job backoff limit |
+
+### Cleanup
+```bash
+cd k8s-test-scenarios
+./scripts/cleanup.sh
+```
 
 ---
 
