@@ -1,0 +1,44 @@
+# Scenario 8: PVC unbound (storage failure)
+# Requests a storage class that doesn't exist
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc-unbound
+  namespace: default
+  labels:
+    scenario: storage
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: non-existent-storage-class  # doesn't exist → Pending/Unbound
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-storage
+  namespace: default
+  labels:
+    scenario: storage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-storage
+  template:
+    metadata:
+      labels:
+        app: test-storage
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: test-pvc-unbound  # pod stays Pending because PVC is unbound

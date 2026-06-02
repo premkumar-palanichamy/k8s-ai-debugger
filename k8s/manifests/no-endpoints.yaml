@@ -1,0 +1,36 @@
+# Scenario 6: Service with wrong selector (no endpoints)
+# Service selector doesn't match any pod labels
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app
+  namespace: default
+  labels:
+    scenario: networking
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-app
+  template:
+    metadata:
+      labels:
+        app: test-app       # label is "test-app"
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-app-svc
+  namespace: default
+spec:
+  selector:
+    app: wrong-label        # wrong! doesn't match "test-app" → no endpoints
+  ports:
+  - port: 80
+    targetPort: 80

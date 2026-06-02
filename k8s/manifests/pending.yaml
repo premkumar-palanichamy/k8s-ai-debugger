@@ -1,0 +1,29 @@
+# Scenario 4: Pending pod (scheduling failure)
+# Requests more CPU than any node has available
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-pending
+  namespace: default
+  labels:
+    scenario: pending
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-pending
+  template:
+    metadata:
+      labels:
+        app: test-pending
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+        resources:
+          requests:
+            memory: "100Gi"   # no node has this much — stays Pending
+            cpu: "100"
+          limits:
+            memory: "100Gi"
+            cpu: "100"

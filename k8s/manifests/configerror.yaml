@@ -1,0 +1,32 @@
+# Scenario 5: Config Error
+# References a ConfigMap that doesn't exist
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-configerror
+  namespace: default
+  labels:
+    scenario: configerror
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-configerror
+  template:
+    metadata:
+      labels:
+        app: test-configerror
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+        envFrom:
+        - configMapRef:
+            name: this-configmap-does-not-exist  # missing → CreateContainerConfigError
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"

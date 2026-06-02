@@ -1,0 +1,30 @@
+# Scenario 3: OOMKilled
+# Memory limit is 32Mi but the app tries to allocate 100Mi
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-oom
+  namespace: default
+  labels:
+    scenario: oom
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-oom
+  template:
+    metadata:
+      labels:
+        app: test-oom
+    spec:
+      containers:
+      - name: app
+        image: busybox:latest
+        command: ["sh", "-c", "cat /dev/zero | head -c 100m > /dev/null"]
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "50m"
+          limits:
+            memory: "32Mi"   # too low — will get OOMKilled
+            cpu: "100m"

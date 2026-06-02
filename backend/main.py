@@ -1,4 +1,7 @@
 """k8s-ai-debugger — FastAPI application entry point."""
+from dotenv import load_dotenv
+load_dotenv()  # loads .env file before anything else runs
+
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

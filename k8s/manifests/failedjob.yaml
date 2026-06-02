@@ -1,0 +1,25 @@
+# Scenario 7: Job failure
+# Job command always fails → hits backoff limit
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-failedjob
+  namespace: default
+  labels:
+    scenario: job-failure
+spec:
+  backoffLimit: 2           # fail after 2 retries
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: job
+        image: busybox:latest
+        command: ["sh", "-c", "echo running job && exit 1"]
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
