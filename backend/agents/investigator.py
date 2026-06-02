@@ -142,10 +142,14 @@ def gather_evidence(
 
 
 def analyze_with_llm(evidence: dict) -> dict:
-    """Send evidence to Claude for root cause analysis."""
+    """
+    Send evidence to the configured LLM for root cause analysis.
+    Tries providers in order: Anthropic → OpenRouter → Gemini.
+    Uses whichever key is available in .env.
+    """
     evidence_text = json.dumps(evidence, indent=2, default=str)
 
-    # Truncate if too large (keep most recent/relevant)
+    # Truncate if too large
     if len(evidence_text) > 80000:
         logger.warning("Evidence too large (%d chars), truncating logs", len(evidence_text))
         if "logs" in evidence:
@@ -161,11 +165,23 @@ def analyze_with_llm(evidence: dict) -> dict:
 
 Respond with valid JSON only. No markdown, no explanation outside the JSON."""
 
-    # Prefer direct Anthropic API
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+    # Try providers in order — use whichever key is available
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if anthropic_key:
+        logger.info("Single model: using Anthropic (Claude)")
         return _call_anthropic(user_message, anthropic_key)
-    return _call_openrouter(user_message)
+
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if openrouter_key:
+        logger.info("Single model: using OpenRouter")
+        return _call_openrouter(user_message, openrouter_key)
+
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if gemini_key:
+        logger.info("Single model: using Gemini")
+        return _call_gemini(user_message, gemini_key)
+
+    raise ValueError("No API key found. Set ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or GEMINI_API_KEY in .env")
 
 
 def _call_anthropic(user_message: str, api_key: str) -> dict:
@@ -181,18 +197,51 @@ def _call_anthropic(user_message: str, api_key: str) -> dict:
     return _parse_llm_response(message.content[0].text)
 
 
-def _call_openrouter(user_message: str) -> dict:
+def _call_openrouter(user_message: str, api_key: str = "") -> dict:
     import httpx
-    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if not api_key:
+        api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3-haiku")
     response = httpx.post(
         "https://openrouter.ai/api/v1/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_message}], "temperature": 0.1},
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/premkumar-palanichamy/k8s-ai-debugger",
+            "X-Title": "K8s AI Debugger",
+        },
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ],
+            "temperature": 0.1
+        },
         timeout=90,
     )
     response.raise_for_status()
     return _parse_llm_response(response.json()["choices"][0]["message"]["content"])
+
+def _call_gemini(user_message: str, api_key: str = "") -> dict:
+    import httpx
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    response = httpx.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        params={"key": api_key},
+        headers={"Content-Type": "application/json"},
+        json={
+            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+            "contents": [{"parts": [{"text": user_message}]}],
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048},
+        },
+        timeout=90,
+    )
+    response.raise_for_status()
+    content = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+    return _parse_llm_response(content)
 
 
 def _parse_llm_response(content: str) -> dict:

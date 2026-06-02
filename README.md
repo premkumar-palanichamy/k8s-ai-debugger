@@ -75,6 +75,57 @@ curl -X POST http://localhost:8000/api/v1/investigate \
 curl http://localhost:8000/api/v1/investigation/<investigation_id>
 ```
 
+## LLM configuration
+
+No mode switching needed. Add whichever API keys you have — the app automatically decides:
+
+| Keys configured | What happens |
+|---|---|
+| 1 key | Runs that model only |
+| 2 keys | Runs both in parallel — 2-way correlation |
+| 3 keys | Full 3-way correlation — highest confidence |
+
+```env
+# Anthropic — direct Claude (console.anthropic.com)
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-4-6
+
+# OpenRouter — 100+ models via one key (openrouter.ai)
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=anthropic/claude-3-haiku
+
+# Google Gemini — direct Gemini (aistudio.google.com)
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-1.5-flash
+```
+
+## Multi-model ensemble
+
+When 2 or more API keys are configured, the app automatically runs all models in parallel and correlates their diagnoses:
+
+```
+Same kubectl evidence
+        ↓
+Claude  ──┐
+Gemini  ──┼──→ run in parallel → correlate → result
+OpenRouter──┘
+        ↓
+All agree  → HIGH correlation  → confidence +20%
+2 agree    → MEDIUM            → confidence +10%
+All differ → LOW               → flag for human review
+```
+
+The dashboard shows a **Model Comparison** tab with individual model results, category votes, and ensemble confidence score.
+
+## ArgoCD integration
+
+When `ARGOCD_URL` is set, investigations also include ArgoCD app health, sync status, recent deployment history, and unhealthy resources in the GitOps pipeline.
+
+```env
+ARGOCD_URL=https://your-argocd-server.example.com
+ARGOCD_TOKEN=your_argocd_api_token
+```
+
 ## Local k8s test scenarios
 
 ```bash
@@ -106,6 +157,37 @@ cd k8s
 - networking and endpoint mismatches
 - rollout and deployment progression failures
 - config and secret reference errors
+- ArgoCD sync and GitOps pipeline failures
+
+## Project structure
+
+```
+k8s-ai-debugger/
+├── backend/
+│   ├── main.py               FastAPI entry point (auto-detects kubeconfig)
+│   ├── agents/
+│   │   ├── investigator.py   evidence gathering + LLM analysis
+│   │   └── ensemble.py       multi-model correlation engine
+│   ├── api/
+│   │   └── routes.py         HTTP endpoints
+│   ├── db/
+│   │   └── database.py       SQLite persistence
+│   └── tools/                kubectl wrappers (one per concern)
+│       ├── pod_inspector.py
+│       ├── logs_collector.py
+│       ├── events_analyzer.py
+│       ├── deployment_inspector.py
+│       ├── network_inspector.py
+│       ├── node_inspector.py
+│       ├── storage_inspector.py
+│       ├── rbac_inspector.py
+│       ├── resource_quota_inspector.py
+│       ├── job_inspector.py
+│       ├── cert_inspector.py
+│       └── argocd_inspector.py
+└── frontend/
+    └── index.html            self-contained dark mode dashboard
+```
 
 ## Documentation
 
