@@ -21,6 +21,9 @@ from backend.tools.argocd_inspector import inspect_argocd_apps, inspect_argocd_a
 
 logger = logging.getLogger(__name__)
 
+# Import ensemble — automatically used when 2+ API keys are configured
+from backend.agents.ensemble import analyze_with_ensemble_sync
+
 SYSTEM_PROMPT = """You are an expert Kubernetes Site Reliability Engineer (SRE) with deep expertise in:
 - Pod lifecycle, scheduling, and failure patterns
 - Node health, resource pressure, and taints
@@ -211,9 +214,20 @@ def investigate(
     service_account: Optional[str] = None,
     scan_mode: str = "targeted",
 ) -> dict:
-    """Main entry point: gather evidence, analyze, return structured result."""
-    logger.info("Starting investigation: namespace=%s pod=%s deployment=%s scan_mode=%s",
-                namespace, pod_name, deployment_name, scan_mode)
+    """
+    Main entry point: gather evidence, analyze, return structured result.
+
+    Automatically detects how many LLM API keys are in .env:
+      1 key configured  → single model analysis
+      2+ keys configured → multi-model ensemble with correlation
+
+    No manual configuration needed — just add API keys.
+    """
+    logger.info(
+        "Starting investigation: namespace=%s pod=%s deployment=%s scan_mode=%s",
+        namespace, pod_name, deployment_name, scan_mode
+    )
+
     evidence = gather_evidence(
         namespace=namespace,
         pod_name=pod_name,
@@ -223,14 +237,57 @@ def investigate(
         service_account=service_account,
         scan_mode=scan_mode,
     )
-    analysis = analyze_with_llm(evidence)
-    return {
-        "namespace": namespace,
-        "pod_name": pod_name,
-        "deployment_name": deployment_name,
-        "node_name": node_name,
-        "job_name": job_name,
-        "scan_mode": scan_mode,
-        "evidence": evidence,
-        "analysis": analysis,
-    }
+
+    # Automatically detect how many models are configured
+    # 1 key → single model, 2+ keys → ensemble (no manual toggle needed)
+    from backend.agents.ensemble import get_configured_models
+    configured = get_configured_models()
+
+    if len(configured) > 1:
+        logger.info("Auto-detected %d API keys — running ensemble analysis", len(configured))
+        ensemble_result = analyze_with_ensemble_sync(evidence)
+        correlation = ensemble_result.get("correlation", {})
+        # Normalize correlation result into standard analysis shape
+        analysis = {
+            "root_cause": correlation.get("summary", ""),
+            "failure_category": correlation.get("agreed_category", "unknown"),
+            "confidence": correlation.get("ensemble_confidence", 0),
+            "severity": correlation.get("severity", "unknown"),
+            "signals": correlation.get("merged_signals", []),
+            "affected_resources": correlation.get("affected_resources", []),
+            "fix_recommendations": correlation.get("fix_recommendations", []),
+            "prevention": correlation.get("prevention", ""),
+            "summary": correlation.get("summary", ""),
+            "correlation": correlation.get("correlation", ""),
+            "recommendation": correlation.get("recommendation", ""),
+            "needs_human_review": correlation.get("needs_human_review", False),
+        }
+        return {
+            "namespace": namespace,
+            "pod_name": pod_name,
+            "deployment_name": deployment_name,
+            "node_name": node_name,
+            "job_name": job_name,
+            "scan_mode": scan_mode,
+            "mode": "ensemble",
+            "models_used": [m["label"] for m in configured],
+            "evidence": evidence,
+            "analysis": analysis,
+            "ensemble": ensemble_result,
+        }
+    else:
+        logger.info("Auto-detected %d API key — running single model analysis",
+                    len(configured))
+        analysis = analyze_with_llm(evidence)
+        return {
+            "namespace": namespace,
+            "pod_name": pod_name,
+            "deployment_name": deployment_name,
+            "node_name": node_name,
+            "job_name": job_name,
+            "scan_mode": scan_mode,
+            "mode": "single",
+            "models_used": [m["label"] for m in configured] if configured else ["none"],
+            "evidence": evidence,
+            "analysis": analysis,
+        }

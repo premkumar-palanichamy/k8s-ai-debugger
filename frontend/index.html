@@ -345,6 +345,7 @@ function renderResult(inv) {
       <div class="tab" onclick="showTab(this,'signals')">Signals (${(a.signals||[]).length})</div>
       <div class="tab" onclick="showTab(this,'fixes')">Fix Steps (${(a.fix_recommendations||[]).length})</div>
       <div class="tab" onclick="showTab(this,'prevention')">Prevention</div>
+      <div class="tab" onclick="showTab(this,'ensemble')">Model Comparison</div>
       <div class="tab" onclick="showTab(this,'raw')">Raw Evidence</div>
     </div>
 
@@ -359,15 +360,110 @@ function renderResult(inv) {
     <div id="tab-signals" style="display:none"><ul class="signals-list">${signals || '<li>No signals captured</li>'}</ul></div>
     <div id="tab-fixes" style="display:none">${fixes || '<p style="color:var(--muted)">No fix recommendations</p>'}</div>
     <div id="tab-prevention" style="display:none"><div class="prevention-box">💡 ${a.prevention || 'No prevention advice available.'}</div></div>
+    <div id="tab-ensemble" style="display:none" id="tab-ensemble-panel"></div>
+    <div id="tab-ensemble" style="display:none">${renderEnsemble(inv)}</div>
     <div id="tab-raw" style="display:none">
       <div class="fix-cmd" style="max-height:500px;overflow-y:auto;white-space:pre-wrap">${JSON.stringify(inv.evidence||{}, null, 2)}</div>
     </div>`;
 }
 
+function renderEnsemble(inv) {
+  const ensemble = inv.ensemble;
+  if (!ensemble || ensemble.ensemble === 'not_configured') {
+    return `<div style="color:var(--muted);padding:20px">
+      <p>Ensemble mode is not enabled.</p>
+      <p style="margin-top:8px;font-size:12px">Set <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">ENSEMBLE_MODE=true</code> in your .env file to compare multiple AI models.</p>
+    </div>`;
+  }
+  const corr = ensemble.correlation || {};
+  const models = ensemble.models || {};
+  const corrColor = corr.correlation === 'HIGH' ? 'var(--green)' : corr.correlation === 'MEDIUM' ? 'var(--amber)' : 'var(--red)';
+  const corrIcon = corr.correlation === 'HIGH' ? '✅' : corr.correlation === 'MEDIUM' ? '⚠️' : '❌';
+
+  // Correlation summary card
+  let html = `
+    <div class="card" style="border-color:${corrColor}">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span style="font-size:28px">${corrIcon}</span>
+        <div>
+          <div style="font-size:16px;font-weight:600;color:${corrColor}">${corr.correlation} CORRELATION</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:2px">${corr.recommendation || ''}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div style="background:var(--bg3);padding:10px 16px;border-radius:var(--radius-sm)">
+          <div style="font-size:11px;color:var(--muted)">Ensemble Confidence</div>
+          <div style="font-size:22px;font-weight:700;color:${corrColor}">${corr.ensemble_confidence || 0}%</div>
+        </div>
+        <div style="background:var(--bg3);padding:10px 16px;border-radius:var(--radius-sm)">
+          <div style="font-size:11px;color:var(--muted)">Agreed Category</div>
+          <div style="font-size:15px;font-weight:600;margin-top:2px">${(corr.agreed_category||'unknown').replace(/_/g,' ')}</div>
+        </div>
+        <div style="background:var(--bg3);padding:10px 16px;border-radius:var(--radius-sm)">
+          <div style="font-size:11px;color:var(--muted)">Models Used</div>
+          <div style="font-size:15px;font-weight:600;margin-top:2px">${corr.model_count || 0} of 3</div>
+        </div>
+        ${corr.needs_human_review ? '<div style="background:#2a1515;border:1px solid var(--red);padding:10px 16px;border-radius:var(--radius-sm);color:var(--red);font-size:13px;font-weight:500">⚠️ Human Review Recommended</div>' : ''}
+      </div>
+    </div>`;
+
+  // Category votes
+  if (corr.category_votes && Object.keys(corr.category_votes).length > 0) {
+    html += `<div class="card">
+      <div class="card-title">🗳️ Category Votes</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">`;
+    for (const [cat, count] of Object.entries(corr.category_votes)) {
+      const isWinner = cat === corr.agreed_category;
+      html += `<div style="background:${isWinner ? 'var(--blue2)' : 'var(--bg3)'};border:1px solid ${isWinner ? 'var(--blue)' : 'var(--border)'};padding:8px 14px;border-radius:99px;font-size:13px">
+        ${cat.replace(/_/g,' ')} <strong>${count}/${corr.model_count}</strong>
+      </div>`;
+    }
+    html += '</div></div>';
+  }
+
+  // Individual model results
+  html += '<div class="card"><div class="card-title">🤖 Individual Model Results</div>';
+  const modelColors = { claude: 'var(--purple)', gemini: 'var(--blue)', llama: 'var(--green)' };
+  const modelIcons = { claude: '🟣', gemini: '🔵', llama: '🟢' };
+
+  for (const [name, result] of Object.entries(models)) {
+    const color = modelColors[name] || 'var(--muted)';
+    const icon = modelIcons[name] || '🤖';
+    if (result.status === 'error') {
+      html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:14px;margin-bottom:10px;border-left:3px solid var(--red)">
+        <div style="font-weight:600">${icon} ${name.toUpperCase()} — Failed</div>
+        <div style="font-size:12px;color:var(--red);margin-top:4px">${result.error || 'Unknown error'}</div>
+      </div>`;
+      continue;
+    }
+    const agrees = result.failure_category === corr.agreed_category;
+    html += `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:14px;margin-bottom:10px;border-left:3px solid ${agrees ? color : 'var(--muted)'}">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
+        <div>
+          <span style="font-weight:600;color:${color}">${icon} ${name.toUpperCase()}</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:8px">${result.model_id || ''}</span>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:18px;font-weight:700;color:${confidenceColor(result.confidence)}">${result.confidence || 0}%</div>
+          <div style="font-size:10px;color:var(--muted)">confidence</div>
+        </div>
+      </div>
+      <div style="font-size:13px;margin-bottom:6px"><strong>Root cause:</strong> ${result.root_cause || 'N/A'}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <span style="background:var(--bg2);padding:2px 8px;border-radius:99px;font-size:11px">${(result.failure_category||'unknown').replace(/_/g,' ')}</span>
+        <span style="background:var(--bg2);padding:2px 8px;border-radius:99px;font-size:11px">severity: ${result.severity||'?'}</span>
+        ${agrees ? '<span style="background:#0d2a1a;color:var(--green);padding:2px 8px;border-radius:99px;font-size:11px">✓ agrees with ensemble</span>' : '<span style="background:#2a1515;color:var(--red);padding:2px 8px;border-radius:99px;font-size:11px">✗ disagrees</span>'}
+      </div>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
 function showTab(el, name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  ['summary','signals','fixes','prevention','raw'].forEach(t => {
+  ['summary','signals','fixes','prevention','ensemble','raw'].forEach(t => {
     const el = document.getElementById('tab-'+t);
     if (el) el.style.display = t === name ? 'block' : 'none';
   });

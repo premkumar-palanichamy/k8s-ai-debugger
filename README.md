@@ -1,12 +1,14 @@
 # ⎈ K8s AI Debugger
 
-An AI-powered Kubernetes troubleshooting agent that automatically investigates cluster failures, identifies root causes using Claude, and provides actionable fix recommendations — across all major failure types.
+An AI-powered Kubernetes troubleshooting agent that automatically investigates cluster failures, identifies root causes using multiple AI models, and provides actionable fix recommendations — across all major failure types.
 
 ## What it does
 
-You point it at a namespace, pod, deployment, or job. It collects evidence from your cluster using `kubectl`, sends everything to Claude for analysis, and returns a structured diagnosis with exact commands to fix the problem.
+You point it at a namespace, pod, deployment, or job. It collects evidence from your cluster using `kubectl`, sends everything to Claude (or multiple models simultaneously) for analysis, and returns a structured diagnosis with exact commands to fix the problem.
 
 No more manually running `kubectl describe`, `kubectl logs`, `kubectl get events` one by one trying to piece together what went wrong.
+
+---
 
 ## Supported failure types
 
@@ -28,6 +30,8 @@ No more manually running `kubectl describe`, `kubectl logs`, `kubectl get events
 | `argocd_sync` | ArgoCD app out of sync, sync failed, unhealthy resources in GitOps pipeline |
 | `unknown` | Evidence collected but root cause unclear — raw data provided for manual review |
 
+---
+
 ## Architecture
 
 ```
@@ -45,10 +49,11 @@ Investigation Layer (backend/tools/)
   ├── resource_quota_inspector.py   quota usage, LimitRanges, HPA
   ├── job_inspector.py              Jobs, CronJobs
   ├── cert_inspector.py             TLS secrets, cert-manager certificates
-  └── argocd_inspector.py          ArgoCD app health, sync status, resource tree
+  └── argocd_inspector.py           ArgoCD app health, sync status, resource tree
       ↓
-AI Agent (backend/agents/investigator.py)
-  └── collects all evidence → Claude API → structured JSON result
+AI Agent Layer (backend/agents/)
+  ├── investigator.py   collects all evidence → single model analysis
+  └── ensemble.py       sends to multiple LLMs in parallel → correlates results
       ↓
 Persistence (backend/db/database.py)
   └── SQLite — investigation history + user feedback
@@ -63,15 +68,78 @@ FastAPI Backend (backend/api/routes.py)
   └── GET  /api/v1/health
       ↓
 Frontend (frontend/index.html)
-  └── Dark mode dashboard — history sidebar, tabbed results, copy-to-clipboard fixes
+  └── Dark mode dashboard — history sidebar, tabbed results,
+      model comparison view, copy-to-clipboard fix commands
 ```
+
+---
+
+## Multi-Model Ensemble
+
+One of the unique features of this project is **multi-model correlation** — sending the same evidence to multiple AI models simultaneously and comparing their diagnoses to reduce noise and increase confidence.
+
+```
+Same kubectl evidence
+        ↓
+Claude (Anthropic)  ──┐
+OpenRouter model    ──┼──→ run in parallel → correlate → result
+Gemini (Google)     ──┘
+        ↓
+All agree  → HIGH correlation  → confidence +20%
+2 agree    → MEDIUM            → confidence +10%
+All differ → LOW               → flag for human review
+```
+
+### Fully automatic — no toggles needed
+
+The system reads your `.env`, counts how many API keys are present, and decides the mode automatically. You never need to change a config value:
+
+| Keys in `.env` | What happens automatically |
+|---|---|
+| 1 key | Runs that model only |
+| 2 keys | Runs both in parallel — 2-way correlation |
+| 3 keys | Full 3-way correlation — highest confidence |
+
+Just add your API keys and the system handles the rest.
+
+### Supported providers
+
+| Provider | Key in `.env` | Default model | Get key |
+|---|---|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | [console.anthropic.com](https://console.anthropic.com) — $5 free credits |
+| OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-3-haiku` | [openrouter.ai](https://openrouter.ai) — free credits |
+| Google Gemini | `GEMINI_API_KEY` | `gemini-1.5-flash` | [aistudio.google.com](https://aistudio.google.com) — free tier |
+
+### Example `.env` configurations
+
+```env
+# Single model — just Anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Two models — automatic 2-way correlation
+ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=...
+
+# Three models — full ensemble, highest confidence
+ANTHROPIC_API_KEY=sk-ant-...
+OPENROUTER_API_KEY=sk-or-...
+GEMINI_API_KEY=...
+```
+
+The dashboard shows a **Model Comparison** tab with:
+- Correlation badge — `HIGH` / `MEDIUM` / `LOW` / `SINGLE`
+- Category votes — how many models picked each failure type
+- Individual model cards with confidence score, root cause, and agreement status
+- Human review flag when models strongly disagree
+
+---
 
 ## Setup
 
 ### Prerequisites
 - Python 3.10+
 - `kubectl` configured and pointing to your cluster (`kubectl get nodes` should work)
-- An Anthropic API key — get one at [console.anthropic.com](https://console.anthropic.com)
+- An API key — Anthropic or OpenRouter (see LLM configuration below)
 
 ### 1. Clone and install
 
@@ -87,25 +155,35 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` and set your API key:
+Edit `.env` — minimum required:
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
+# Pick one:
+ANTHROPIC_API_KEY=sk-ant-...        # direct Anthropic
+OPENROUTER_API_KEY=sk-or-...        # or OpenRouter
 ```
 
 ### 3. Run
 
 ```bash
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+PYTHONPATH=. uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Open [http://localhost:8000](http://localhost:8000) for the dashboard.
 Open [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive API reference.
 
-## Usage examples
+---
+
+## Usage
 
 ### Dashboard
-Use the sidebar to enter a namespace and optional pod/deployment name, choose scan mode, and click **Investigate**.
+Use the sidebar to enter a namespace and optional pod/deployment name, choose scan mode, and click **Investigate**. Results appear in tabbed view:
+- **Summary** — plain English explanation
+- **Signals** — specific evidence that led to the diagnosis
+- **Fix Steps** — exact kubectl commands with expected outcomes
+- **Prevention** — how to avoid this in future
+- **Model Comparison** — ensemble results (if enabled)
+- **Raw Evidence** — full JSON from all kubectl tools
 
 ### API
 
@@ -120,7 +198,7 @@ curl -X POST http://localhost:8000/api/v1/investigate/sync \
   -H "Content-Type: application/json" \
   -d '{"namespace": "production", "scan_mode": "full"}'
 
-# Check RBAC issues for a specific ServiceAccount
+# Check RBAC for a specific ServiceAccount
 curl -X POST http://localhost:8000/api/v1/investigate/sync \
   -H "Content-Type: application/json" \
   -d '{"namespace": "default", "service_account": "my-sa"}'
@@ -129,10 +207,10 @@ curl -X POST http://localhost:8000/api/v1/investigate/sync \
 curl -X POST http://localhost:8000/api/v1/investigate \
   -H "Content-Type: application/json" \
   -d '{"namespace": "default", "pod_name": "my-app-xyz"}'
-# → returns {"investigation_id": "abc-123", "status": "running"}
+# → {"investigation_id": "abc-123", "status": "running"}
 
 curl http://localhost:8000/api/v1/investigation/abc-123
-# → returns full result when done
+# → full result when done
 ```
 
 ### Example response
@@ -156,24 +234,49 @@ curl http://localhost:8000/api/v1/investigation/abc-123
       "expected_outcome": "Pod restarts without OOMKilled"
     }
   ],
-  "prevention": "Set memory requests and limits based on actual observed usage. Use VPA (Vertical Pod Autoscaler) to automate right-sizing.",
+  "prevention": "Set memory requests and limits based on actual observed usage. Use VPA to automate right-sizing.",
   "summary": "The app container is being killed by the kernel because it exceeds its 128Mi memory limit. Increasing the limit to 512Mi should resolve the crashes immediately."
 }
 ```
 
-## LLM configuration
+---
 
-The agent uses Claude directly via the Anthropic SDK by default. If `ANTHROPIC_API_KEY` is set, it uses that. It also supports OpenRouter as a fallback (useful for free tier or trying different models).
+## LLM Configuration
+
+No mode switching needed. Just add the API keys you have — the app figures out the rest.
 
 ```env
-# Direct Anthropic (default, recommended)
+# Anthropic — direct Claude (get key at console.anthropic.com)
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-sonnet-4-6
+ANTHROPIC_MODEL=claude-sonnet-4-6        # optional, this is the default
 
-# OpenRouter fallback
-OPENROUTER_API_KEY=...
-OPENROUTER_MODEL=anthropic/claude-3-haiku
+# OpenRouter — 100+ models via one key (get key at openrouter.ai)
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=anthropic/claude-3-haiku  # optional, this is the default
+
+# Google Gemini — direct Gemini (get key at aistudio.google.com)
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-1.5-flash            # optional, this is the default
 ```
+
+**Minimum to get started:** one key from any provider above.
+
+---
+
+## ArgoCD Integration
+
+When `ARGOCD_URL` is configured, investigations also include:
+- App health and sync status
+- Recent deployment history
+- Unhealthy resources in the GitOps pipeline
+- Sync error messages
+
+```env
+ARGOCD_URL=https://your-argocd-server.example.com
+ARGOCD_TOKEN=your_argocd_api_token
+```
+
+---
 
 ## Project structure
 
@@ -186,14 +289,27 @@ k8s-ai-debugger/
 ├── backend/
 │   ├── main.py               FastAPI app entry point
 │   ├── agents/
-│   │   └── investigator.py   evidence gathering + LLM analysis
+│   │   ├── investigator.py   evidence gathering + LLM analysis
+│   │   └── ensemble.py       multi-model correlation engine
 │   ├── api/
 │   │   └── routes.py         HTTP endpoints
 │   ├── db/
 │   │   └── database.py       SQLite persistence
 │   └── tools/                kubectl wrappers (one per concern)
+│       ├── pod_inspector.py
+│       ├── logs_collector.py
+│       ├── events_analyzer.py
+│       ├── deployment_inspector.py
+│       ├── network_inspector.py
+│       ├── node_inspector.py
+│       ├── storage_inspector.py
+│       ├── rbac_inspector.py
+│       ├── resource_quota_inspector.py
+│       ├── job_inspector.py
+│       ├── cert_inspector.py
+│       └── argocd_inspector.py
 └── frontend/
-    └── index.html            self-contained dashboard
+    └── index.html            self-contained dark mode dashboard
 ```
 
 ---
