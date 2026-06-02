@@ -17,6 +17,7 @@ from backend.tools.rbac_inspector import inspect_rbac
 from backend.tools.resource_quota_inspector import inspect_resource_quotas, inspect_limit_ranges, inspect_hpa
 from backend.tools.job_inspector import inspect_jobs, inspect_cronjobs
 from backend.tools.cert_inspector import inspect_tls_secrets, inspect_cert_manager_certs
+from backend.tools.argocd_inspector import inspect_argocd_apps, inspect_argocd_app_detail
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +55,13 @@ FAILURE CATEGORIES:
 - networking: No endpoints, service selector mismatch, ingress misconfiguration
 - rollout: Deployment stuck, progress deadline exceeded
 - config_error: ConfigMap/Secret missing, env var misconfiguration
+- argocd_sync: ArgoCD app out of sync, sync failed, unhealthy resources in GitOps pipeline
 - unknown: Cannot determine root cause
 
 Respond ONLY with valid JSON in this exact format:
 {
   "root_cause": "concise description of the root cause",
-  "failure_category": "one of the categories above",
+  "failure_category": "one of the categories above (include argocd_sync if ArgoCD evidence present)",
   "confidence": 85,
   "signals": ["specific evidence item 1", "specific evidence item 2"],
   "affected_resources": ["pod/my-app-xyz", "deployment/my-app"],
@@ -129,6 +131,9 @@ def gather_evidence(
     # Nodes (always useful context)
     evidence["nodes"] = inspect_nodes()
     evidence["node_metrics"] = get_node_metrics()
+
+    # ArgoCD (optional — only runs if ARGOCD_URL is set in .env)
+    evidence["argocd"] = inspect_argocd_apps(namespace=namespace)
 
     return evidence
 

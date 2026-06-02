@@ -25,6 +25,7 @@ No more manually running `kubectl describe`, `kubectl logs`, `kubectl get events
 | `networking` | No ready endpoints, service selector mismatch, LoadBalancer pending, ingress issues |
 | `rollout` | Deployment progress deadline exceeded, replicas not available |
 | `config_error` | Missing ConfigMap/Secret, CreateContainerConfigError |
+| `argocd_sync` | ArgoCD app out of sync, sync failed, unhealthy resources in GitOps pipeline |
 | `unknown` | Evidence collected but root cause unclear — raw data provided for manual review |
 
 ## Architecture
@@ -43,7 +44,8 @@ Investigation Layer (backend/tools/)
   ├── rbac_inspector.py             roles, bindings, Forbidden events
   ├── resource_quota_inspector.py   quota usage, LimitRanges, HPA
   ├── job_inspector.py              Jobs, CronJobs
-  └── cert_inspector.py             TLS secrets, cert-manager certificates
+  ├── cert_inspector.py             TLS secrets, cert-manager certificates
+  └── argocd_inspector.py          ArgoCD app health, sync status, resource tree
       ↓
 AI Agent (backend/agents/investigator.py)
   └── collects all evidence → Claude API → structured JSON result
@@ -194,6 +196,17 @@ k8s-ai-debugger/
     └── index.html            self-contained dashboard
 ```
 
-## License
+---
 
-MIT
+## 📝 License
+
+This project is licensed under the terms of the [LICENSE](LICENSE) file.
+
+---
+
+## 🌐 Connect With Me
+
+🏠 [Portfolio](https://ladviksolutions.netlify.app/)<br>
+🐙 [GitHub](https://github.com/premkumar-palanichamy)<br>
+💼 [LinkedIn](https://linkedin.com/in/premkumarpalanichamy)<br>
+▶️ [YouTube](https://www.youtube.com/channel/UCJKEn6HeAxRNirDMBwFfi3w)
