@@ -216,7 +216,8 @@ def _call_openrouter(user_message: str, api_key: str = "") -> dict:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_message}
             ],
-            "temperature": 0.1
+            "temperature": 0.1,
+            "max_tokens": 2048,
         },
         timeout=90,
     )
@@ -245,13 +246,8 @@ def _call_gemini(user_message: str, api_key: str = "") -> dict:
 
 
 def _parse_llm_response(content: str) -> dict:
-    content = content.strip()
-    if content.startswith("```"):
-        lines = content.splitlines()
-        content = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
-    if content.startswith("json"):
-        content = content[4:].strip()
-    return json.loads(content)
+    from backend.agents.ensemble import _parse_response
+    return _parse_response(content)
 
 
 def investigate(

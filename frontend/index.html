@@ -116,15 +116,18 @@
 
     <div class="form-group">
       <label>Namespace</label>
-      <input id="namespace" type="text" value="default" placeholder="default">
+      <input id="namespace" type="text" value="default" placeholder="default" list="ns-list" onchange="loadWorkloads()">
+      <datalist id="ns-list"></datalist>
     </div>
     <div class="form-group">
       <label>Pod Name <span style="color:var(--muted)">(optional)</span></label>
-      <input id="pod-name" type="text" placeholder="my-app-xyz-abc">
+      <input id="pod-name" type="text" placeholder="my-app-xyz-abc" list="pod-list">
+      <datalist id="pod-list"></datalist>
     </div>
     <div class="form-group">
       <label>Deployment Name <span style="color:var(--muted)">(optional)</span></label>
-      <input id="deployment-name" type="text" placeholder="my-app">
+      <input id="deployment-name" type="text" placeholder="my-app" list="deploy-list">
+      <datalist id="deploy-list"></datalist>
     </div>
     <div class="form-group">
       <label>Job Name <span style="color:var(--muted)">(optional)</span></label>
@@ -187,6 +190,33 @@ async function checkHealth() {
   } catch {
     document.getElementById('api-status').textContent = '❌ API Unreachable';
   }
+}
+
+function fillList(id, items) {
+  const dl = document.getElementById(id);
+  dl.innerHTML = '';
+  items.forEach(([value, label]) => {
+    const o = document.createElement('option');
+    o.value = value;
+    if (label) o.label = label;
+    dl.appendChild(o);
+  });
+}
+
+async function loadNamespaces() {
+  try {
+    const d = await (await fetch(`${API}/namespaces`)).json();
+    fillList('ns-list', (d.namespaces || []).map(n => [n]));
+  } catch {}
+}
+
+async function loadWorkloads() {
+  const ns = document.getElementById('namespace').value || 'default';
+  try {
+    const d = await (await fetch(`${API}/workloads?namespace=${encodeURIComponent(ns)}`)).json();
+    fillList('pod-list', (d.pods || []).map(p => [p.name, (p.healthy ? '✅ ' : '⚠️ ') + p.status]));
+    fillList('deploy-list', (d.deployments || []).map(n => [n]));
+  } catch {}
 }
 
 async function loadHistory() {
@@ -501,6 +531,8 @@ function showToast(msg) {
 // Init
 checkHealth();
 loadHistory();
+loadNamespaces();
+loadWorkloads();
 setInterval(loadHistory, 30000);
 </script>
 </body>

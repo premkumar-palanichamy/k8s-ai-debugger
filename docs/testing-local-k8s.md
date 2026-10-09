@@ -37,10 +37,10 @@ curl -X POST http://localhost:8000/api/v1/investigate/sync \
   -H "Content-Type: application/json" \
   -d '{"namespace":"default","scan_mode":"full"}'
 
-# Target a pod
+# Target a deployment (pods get a generated suffix — pick one from the dashboard dropdown)
 curl -X POST http://localhost:8000/api/v1/investigate/sync \
   -H "Content-Type: application/json" \
-  -d '{"namespace":"default","pod_name":"test-crashloop"}'
+  -d '{"namespace":"default","deployment_name":"test-crashloop"}'
 ```
 
 ## Cleanup

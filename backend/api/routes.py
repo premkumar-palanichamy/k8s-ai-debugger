@@ -133,3 +133,37 @@ async def list_namespaces():
     except Exception:
         pass
     return {"namespaces": ["default"]}
+
+
+@router.get("/workloads")
+async def list_workloads(namespace: str = "default"):
+    """Pods (unhealthy first) and deployments in a namespace — feeds the dashboard pickers."""
+    import json, subprocess
+
+    def _get(kind: str) -> list:
+        try:
+            r = subprocess.run(["kubectl", "get", kind, "-n", namespace, "-o", "json"],
+                               capture_output=True, text=True, timeout=10)
+            return json.loads(r.stdout).get("items", []) if r.returncode == 0 else []
+        except Exception:
+            return []
+
+    pods, deployments = await asyncio.gather(asyncio.to_thread(_get, "pods"), asyncio.to_thread(_get, "deployments"))
+
+    pod_list = []
+    for p in pods:
+        statuses = p.get("status", {}).get("containerStatuses", [])
+        reason = next((s["state"]["waiting"].get("reason") for s in statuses if s.get("state", {}).get("waiting")), None)
+        ready = bool(statuses) and all(s.get("ready") for s in statuses)
+        pod_list.append({
+            "name": p["metadata"]["name"],
+            "status": reason or p.get("status", {}).get("phase", "Unknown"),
+            "healthy": ready and not reason,
+        })
+    pod_list.sort(key=lambda x: (x["healthy"], x["name"]))
+
+    return {
+        "namespace": namespace,
+        "pods": pod_list,
+        "deployments": sorted(d["metadata"]["name"] for d in deployments),
+    }

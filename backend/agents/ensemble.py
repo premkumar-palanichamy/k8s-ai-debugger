@@ -322,13 +322,32 @@ def _correlate(results: list[dict], total_configured: int) -> dict:
 
 # ── Helpers ───────────────────────────────────────────────────────────
 def _parse_response(content: str) -> dict:
-    content = content.strip()
+    """
+    Extract the JSON object from a model reply. Tolerates markdown fences and
+    text before/after the JSON; raises a readable error if the reply was cut off.
+    """
+    content = (content or "").strip()
     if content.startswith("```"):
         lines = content.splitlines()
         content = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
     if content.startswith("json"):
         content = content[4:].strip()
-    return json.loads(content)
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    start = content.find("{")
+    if start != -1:
+        try:
+            parsed, _ = json.JSONDecoder().raw_decode(content[start:])
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(
+        "Model returned an incomplete or non-JSON response — retry the investigation. "
+        f"Reply started with: {content[:120]!r}"
+    )
 
 
 def _error_result(model: dict, error: str) -> dict:
